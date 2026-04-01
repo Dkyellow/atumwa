@@ -33,9 +33,15 @@ app.include_router(webhook.router)
 
 @app.on_event("startup")
 async def startup():
-    if settings.app_env == "development":
+    logger = logging.getLogger(__name__)
+    try:
         await create_all_tables()
-    logging.getLogger(__name__).info("🛵 Atumwa bot is running!")
+        logger.info("✅ Database tables ready")
+    except Exception as e:
+        logger.error("❌ Database connection failed: %s", e)
+        logger.error("Check your DATABASE_URL environment variable on Render.")
+        raise  # still exit so Render shows the error clearly
+    logger.info("🛵 Atumwa bot is running!")
 
 
 @app.get("/")

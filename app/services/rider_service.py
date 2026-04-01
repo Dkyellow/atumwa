@@ -1,13 +1,23 @@
 """
 Rider-related database operations.
+Uses plain Haversine distance instead of PostGIS.
 """
+import math
 from datetime import datetime
 
-from geoalchemy2.functions import ST_DWithin, ST_MakePoint, ST_SetSRID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Rider, VehicleType
+
+
+def _haversine_km(lat1, lon1, lat2, lon2) -> float:
+    """Straight-line distance between two lat/lon points in km."""
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    return R * 2 * math.asin(math.sqrt(a))
 
 
 async def get_rider_by_phone(db: AsyncSession, phone: str) -> Rider | None:
@@ -20,19 +30,11 @@ async def get_rider_by_id(db: AsyncSession, rider_id: int) -> Rider | None:
     return result.scalar_one_or_none()
 
 
-async def register_rider(
-    db: AsyncSession,
-    phone: str,
-    name: str,
-    vehicle_type: str,
-    plate: str,
-) -> Rider:
-    # Map string → enum
+async def register_rider(db: AsyncSession, phone: str, name: str, vehicle_type: str, plate: str) -> Rider:
     vt_map = {"bike": VehicleType.BIKE, "car": VehicleType.CAR, "truck": VehicleType.TRUCK}
 
     existing = await get_rider_by_phone(db, phone)
     if existing:
-        # Re-registration: update details
         existing.name         = name
         existing.vehicle_type = vt_map[vehicle_type]
         existing.plate_number = plate
@@ -42,11 +44,9 @@ async def register_rider(
         return existing
 
     rider = Rider(
-        phone        = phone,
-        name         = name,
-        vehicle_type = vt_map[vehicle_type],
-        plate_number = plate,
-        is_active    = True,
+        phone=phone, name=name,
+        vehicle_type=vt_map[vehicle_type],
+        plate_number=plate, is_active=True,
     )
     db.add(rider)
     await db.commit()
@@ -55,13 +55,9 @@ async def register_rider(
 
 
 async def update_rider_location(db: AsyncSession, phone: str, lat: float, lon: float) -> None:
-    """Update the rider's PostGIS location and mark them online."""
-    point = ST_SetSRID(ST_MakePoint(lon, lat), 4326)
     await db.execute(
-        update(Rider)
-        .where(Rider.phone == phone)
-        .values(
-            location=point,
+        update(Rider).where(Rider.phone == phone).values(
+            lat=lat, lon=lon,
             last_seen_at=datetime.utcnow(),
             is_online=True,
         )
@@ -70,25 +66,11 @@ async def update_rider_location(db: AsyncSession, phone: str, lat: float, lon: f
 
 
 async def set_rider_offline(db: AsyncSession, phone: str) -> None:
-    await db.execute(
-        update(Rider).where(Rider.phone == phone).values(is_online=False)
-    )
+    await db.execute(update(Rider).where(Rider.phone == phone).values(is_online=False))
     await db.commit()
 
 
-async def find_nearest_riders(
-    db: AsyncSession,
-    lat: float,
-    lon: float,
-    package_type: str,
-    limit: int = 5,
-    radius_km: float = 10.0,
-) -> list[Rider]:
-    """
-    Find up to `limit` online riders within `radius_km` km of (lat, lon),
-    filtered by vehicle suitability for the package type, ordered by distance.
-    """
-    # Determine which vehicle types can handle this package
+async def find_nearest_riders(db: AsyncSession, lat: float, lon: float, package_type: str, limit: int = 5, radius_km: float = 10.0) -> list[Rider]:
     if "large" in package_type.lower() or "heavy" in package_type.lower():
         suitable = [VehicleType.TRUCK, VehicleType.CAR]
     elif "groceries" in package_type.lower():
@@ -96,29 +78,29 @@ async def find_nearest_riders(
     else:
         suitable = [VehicleType.BIKE, VehicleType.CAR, VehicleType.TRUCK]
 
-    point = ST_SetSRID(ST_MakePoint(lon, lat), 4326)
-    radius_m = radius_km * 1000
-
     result = await db.execute(
-        select(Rider)
-        .where(
+        select(Rider).where(
             Rider.is_online == True,
             Rider.is_active == True,
             Rider.vehicle_type.in_(suitable),
-            ST_DWithin(Rider.location, point, radius_m),
-        )
-        .order_by(Rider.rating.desc())
-        .limit(limit)
+            Rider.lat.isnot(None),
+        ).order_by(Rider.rating.desc())
     )
-    return list(result.scalars().all())
+    all_riders = list(result.scalars().all())
+
+    # Filter by distance in Python using Haversine
+    nearby = [
+        r for r in all_riders
+        if _haversine_km(lat, lon, r.lat, r.lon) <= radius_km
+    ]
+    return nearby[:limit]
 
 
 async def update_rider_rating(db: AsyncSession, rider_id: int, new_stars: int) -> None:
-    """Recalculate running average rating after a new review."""
     rider = await get_rider_by_id(db, rider_id)
     if not rider:
         return
-    total        = rider.rating * rider.rating_count + new_stars
+    total = rider.rating * rider.rating_count + new_stars
     rider.rating_count += 1
     rider.rating = round(total / rider.rating_count, 2)
     await db.commit()

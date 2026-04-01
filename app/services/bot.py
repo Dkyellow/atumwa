@@ -190,9 +190,7 @@ async def _step_menu(phone, text, session, db) -> str:
         session["role"] = "rider"
         await save_session(phone, session)
         return (
-            "🏍️ *Rider Registration*
-
-"
+            "🏍️ *Rider Registration*"
             "What is your full name?"
         )
     elif text == "3":
@@ -205,29 +203,20 @@ async def _step_menu(phone, text, session, db) -> str:
                 session["rider_id"] = rider.id
                 await save_session(phone, session)
                 return (
-                    f"👋 Welcome back, *{rider.name}*!
-
-"
-                    "Please share your current location to go online ✅
-
-"
+                    f"👋 Welcome back, *{rider.name}*!"
+                    "Please share your current location to go online ✅"
                     "_Tap 📎 → Location → Send your current location_"
                 )
         return (
-            "We couldn't find your rider account.
-"
+            "We couldn't find your rider account."
             "Reply *2* to register as a rider first."
         )
     else:
         return (
-            "Please reply with:
-
-"
-            "*1* – 📦 Send a delivery
-"
-            "*2* – 🏍️ Register as a rider
-"
-            "*3* – ✅ I'm a rider, go online"
+            "Please reply with:\n"
+            "*1* – 📦 Send a delivery\n"
+            "*2* – 🏍️ Register as a rider\n"
+            "*3* – ✅ I'm a rider, go online\n"
         )
 
 

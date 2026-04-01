@@ -181,11 +181,8 @@ async def _step_menu(phone, text, session, db) -> str:
         session["role"] = "customer"
         await save_session(phone, session)
         return (
-            "📦 *Send a Delivery*
-
-"
-            "📍 *Where should we pick it up?*
-"
+            "📦 *Send a Delivery*"
+            "📍 *Where should we pick it up?*"
             "Type an address _or_ tap the 📎 attach button and share your location pin."
         )
     elif text == "2":

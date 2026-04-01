@@ -32,6 +32,7 @@ AWAITING_PAYMENT       = "AWAITING_PAYMENT"
 AWAITING_ECOCASH_NUM   = "AWAITING_ECOCASH_NUM"
 SHOWING_RIDERS         = "SHOWING_RIDERS"
 IN_RELAY               = "IN_RELAY"
+AWAITING_MENU          = "AWAITING_MENU"
 
 RIDER_REG_NAME         = "RIDER_REG_NAME"
 RIDER_REG_VEHICLE      = "RIDER_REG_VEHICLE"
@@ -84,6 +85,9 @@ async def handle_message(
     # ── Route by current step ─────────────────────────────────────────────────
     if step == START:
         return await _step_start(phone, text, session, db)
+
+    if step == AWAITING_MENU:
+        return await _step_menu(phone, text, session, db)
 
     # ── Customer flow ─────────────────────────────────────────────────────────
     if step == AWAITING_PICKUP:
@@ -169,6 +173,65 @@ async def _step_start(phone, text, session, db) -> str:
         "📍 *Where should we pick it up?*\n"
         "Type an address _or_ share your location pin."
     )
+
+
+async def _step_menu(phone, text, session, db) -> str:
+    if text == "1":
+        session["step"] = AWAITING_PICKUP
+        session["role"] = "customer"
+        await save_session(phone, session)
+        return (
+            "📦 *Send a Delivery*
+
+"
+            "📍 *Where should we pick it up?*
+"
+            "Type an address _or_ tap the 📎 attach button and share your location pin."
+        )
+    elif text == "2":
+        session["step"] = RIDER_REG_NAME
+        session["role"] = "rider"
+        await save_session(phone, session)
+        return (
+            "🏍️ *Rider Registration*
+
+"
+            "What is your full name?"
+        )
+    elif text == "3":
+        from app.services.rider_service import get_rider_by_phone
+        if db:
+            rider = await get_rider_by_phone(db, phone)
+            if rider:
+                session["step"] = RIDER_ACTIVE
+                session["role"] = "rider"
+                session["rider_id"] = rider.id
+                await save_session(phone, session)
+                return (
+                    f"👋 Welcome back, *{rider.name}*!
+
+"
+                    "Please share your current location to go online ✅
+
+"
+                    "_Tap 📎 → Location → Send your current location_"
+                )
+        return (
+            "We couldn't find your rider account.
+"
+            "Reply *2* to register as a rider first."
+        )
+    else:
+        return (
+            "Please reply with:
+
+"
+            "*1* – 📦 Send a delivery
+"
+            "*2* – 🏍️ Register as a rider
+"
+            "*3* – ✅ I'm a rider, go online"
+        )
 
 
 async def _step_pickup(phone, text, location, session) -> str:
@@ -275,11 +338,10 @@ async def _finalize_order(phone, session, db=None) -> str:
         order = await create_order(db, phone, session)
         order_id = order.id
 
-        if session.get("pickup_lat"):
-            riders = await find_nearest_riders(
+        riders = await find_nearest_riders(
                 db,
-                lat=session["pickup_lat"],
-                lon=session["pickup_lon"],
+                lat=session.get("pickup_lat"),
+                lon=session.get("pickup_lon"),
                 package_type=session["package_type"],
                 limit=5,
             )

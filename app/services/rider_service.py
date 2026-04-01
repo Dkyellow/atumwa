@@ -70,7 +70,18 @@ async def set_rider_offline(db: AsyncSession, phone: str) -> None:
     await db.commit()
 
 
-async def find_nearest_riders(db: AsyncSession, lat: float, lon: float, package_type: str, limit: int = 5, radius_km: float = 10.0) -> list[Rider]:
+async def find_nearest_riders(
+    db: AsyncSession,
+    lat: float | None,
+    lon: float | None,
+    package_type: str,
+    limit: int = 5,
+    radius_km: float = 15.0,
+) -> list[Rider]:
+    """
+    Find nearest online riders.
+    If no coordinates provided, return all online riders sorted by rating.
+    """
     if "large" in package_type.lower() or "heavy" in package_type.lower():
         suitable = [VehicleType.TRUCK, VehicleType.CAR]
     elif "groceries" in package_type.lower():
@@ -83,16 +94,25 @@ async def find_nearest_riders(db: AsyncSession, lat: float, lon: float, package_
             Rider.is_online == True,
             Rider.is_active == True,
             Rider.vehicle_type.in_(suitable),
-            Rider.lat.isnot(None),
         ).order_by(Rider.rating.desc())
     )
     all_riders = list(result.scalars().all())
 
-    # Filter by distance in Python using Haversine
+    # If no customer coordinates — return all online riders
+    if lat is None or lon is None:
+        return all_riders[:limit]
+
+    # Filter by Haversine distance
     nearby = [
         r for r in all_riders
-        if _haversine_km(lat, lon, r.lat, r.lon) <= radius_km
+        if r.lat is not None and r.lon is not None
+        and _haversine_km(lat, lon, r.lat, r.lon) <= radius_km
     ]
+
+    # Fallback: if no riders within radius, return all online riders anyway
+    if not nearby:
+        return all_riders[:limit]
+
     return nearby[:limit]
 
 
